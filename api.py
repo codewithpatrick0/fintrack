@@ -3,8 +3,12 @@ import psycopg2
 from conexion import str_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
 from usuarios_modelo import UsuarioCrear, UsuarioLeer
+from passlib.context import CryptContext
+
 
 app = FastAPI()
+
+pwd_context = CryptContext(schemes=["argon2"], deprecated='auto')
 
 @app.get('/transacciones', response_model=list[TransaccionLeer])
 def obtener_transacciones():
@@ -64,14 +68,14 @@ def crear_transaccion(transaccion: TransaccionCrear): #entra
     """, (id_usuario_input, id_categoria_input, tipo_movimiento_input,
             monto_input, fuente_input, info_input))
     resultado = cursor.fetchone()
-    id_generado = resultado[0] if resultado else None
+    id_asignado = resultado[0] if resultado else None
     conexion.commit()
 
     cursor.close()
     conexion.close()
 
     return TransaccionLeer(
-        id=id_generado,
+        id=id_asignado,
         id_usuario=id_usuario_input,
         id_categoria=id_categoria_input,
         tipo_movimiento=tipo_movimiento_input,
@@ -128,5 +132,30 @@ def registrar_usuario(u: UsuarioCrear):
     
     if len(telefono_input) != 9 or not telefono_input.isdigit():
         raise HTTPException(status_code=400, detail='Teléfono inválido')
+    
+    contraseña_hasheada = pwd_context.hash(contraseña)
 
-    pass
+    conexion = psycopg2.connect(str_conexion)
+    cursor = conexion.cursor()
+
+    consulta = """
+                    INSERT INTO usuarios (nombre, telefono, hash_password)
+                    VALUES (%s, %s, %s) RETURNING id;
+                """
+
+    cursor.execute(consulta, (nombre_input, telefono_input, contraseña_hasheada))
+    resultado = cursor.fetchone()
+    id_asignado = resultado[0] if resultado else None
+    
+    conexion.commit()
+
+    cursor.close()
+    conexion.close()
+
+
+    return UsuarioLeer(
+        id=id_asignado,
+        nombre=nombre_input,
+        telefono=telefono_input,
+        activo=True
+    )

@@ -74,3 +74,34 @@ def crear_transaccion(transaccion: TransaccionCrear): #entra
         fuente=fuente_input,
         info=info_input
     )
+
+@app.get('/1usuarios/{id_user}/transacciones', response_model=list[TransaccionLeer])
+def obtener_transacciones_por_id(id_user: int):
+
+    conexion = psycopg2.connect(str_conexion)
+    cursor = conexion.cursor()
+
+    consulta = """SELECT id, id_usuario,
+                id_categoria, tipo_movimiento, monto,
+                  fuente, info FROM transacciones WHERE id_usuario = %s;"""
+    
+    cursor.execute(consulta, (id_user,))
+    resultados = cursor.fetchall()
+
+    cursor.close()
+    conexion.close()
+
+    if resultados:
+        transacciones = [TransaccionLeer(
+            id=r[0],
+            id_usuario=r[1],
+            id_categoria=r[2],
+            tipo_movimiento=r[3],
+            monto=r[4],
+            fuente=r[5],
+            info=r[6]
+        )
+        for r in resultados]
+        return transacciones
+    
+    return []

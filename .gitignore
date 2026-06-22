@@ -1,1 +1,32 @@
+# Entorno virtual
+venv/
+.venv/
+env/
+
+# Variables de entorno
 .env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# FastAPI / uvicorn
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

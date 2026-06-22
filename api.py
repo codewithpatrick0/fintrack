@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 import psycopg2
 from conexion import str_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
+from usuarios_modelo import UsuarioCrear, UsuarioLeer
 
 app = FastAPI()
 
@@ -11,7 +12,11 @@ def obtener_transacciones():
     conexion = psycopg2.connect(str_conexion)
     cursor = conexion.cursor()
 
-    consulta = "SELECT id, id_usuario, id_categoria, tipo_movimiento, monto, fuente, info FROM transacciones"
+    consulta = """SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info 
+                FROM transacciones t
+                JOIN usuarios u ON u.id = t.id_usuario
+                WHERE u.activo = true;
+                """
 
     cursor.execute(consulta)
     filas = cursor.fetchall()
@@ -57,7 +62,7 @@ def crear_transaccion(transaccion: TransaccionCrear): #entra
         INSERT INTO transacciones(id_usuario, id_categoria, tipo_movimiento, monto, fuente, info)
         VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
     """, (id_usuario_input, id_categoria_input, tipo_movimiento_input,
-           monto_input, fuente_input, info_input))
+            monto_input, fuente_input, info_input))
     resultado = cursor.fetchone()
     id_generado = resultado[0] if resultado else None
     conexion.commit()
@@ -75,15 +80,17 @@ def crear_transaccion(transaccion: TransaccionCrear): #entra
         info=info_input
     )
 
-@app.get('/1usuarios/{id_user}/transacciones', response_model=list[TransaccionLeer])
+@app.get('/usuarios/{id_user}/transacciones', response_model=list[TransaccionLeer])
 def obtener_transacciones_por_id(id_user: int):
 
     conexion = psycopg2.connect(str_conexion)
     cursor = conexion.cursor()
 
-    consulta = """SELECT id, id_usuario,
-                id_categoria, tipo_movimiento, monto,
-                  fuente, info FROM transacciones WHERE id_usuario = %s;"""
+    consulta = """ SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info 
+                FROM transacciones t
+                JOIN usuarios u ON u.id = t.id_usuario
+                WHERE u.activo = true AND t.id_usuario = %s
+                """
     
     cursor.execute(consulta, (id_user,))
     resultados = cursor.fetchall()
@@ -105,3 +112,21 @@ def obtener_transacciones_por_id(id_user: int):
         return transacciones
     
     return []
+
+@app.post('/usuarios/registro', response_model=UsuarioLeer)
+def registrar_usuario(u: UsuarioCrear):
+
+    nombre_input = u.nombre
+    telefono_input = u.telefono
+    contraseña = u.contraseña
+    
+    if len(nombre_input) < 3 or len(nombre_input) > 12:
+        raise HTTPException(status_code=400, detail='El nombre supera el límite de caractéres')
+    
+    if not nombre_input.strip().replace(" ","").isalpha():
+        raise HTTPException(status_code=400, detail='El nombre contiene caractéres inválidos')
+    
+    if len(telefono_input) != 9 or not telefono_input.isdigit():
+        raise HTTPException(status_code=400, detail='Teléfono inválido')
+
+    pass

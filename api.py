@@ -2,13 +2,18 @@ from fastapi import FastAPI, HTTPException
 import psycopg2
 from conexion import str_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
-from usuarios_modelo import UsuarioCrear, UsuarioLeer
+from usuarios_modelo import UsuarioCrear, UsuarioLeer, UsuarioLogin
+from token_modelo import TokenMostrar
 from passlib.context import CryptContext
+from credenciales_login import SECRET_KEY, ALGORITHM
+from datetime import datetime, timezone, timedelta
+import jwt
 
 
 app = FastAPI()
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated='auto')
+
 
 @app.get('/transacciones', response_model=list[TransaccionLeer])
 def obtener_transacciones():
@@ -159,3 +164,44 @@ def registrar_usuario(u: UsuarioCrear):
         telefono=telefono_input,
         activo=True
     )
+
+#Para endpoint login
+def crear_token_acceso(id: int, activo: bool) -> str:
+    payload = {
+        "sub": str(id),
+        "activo": activo,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+@app.post('/login', response_model=TokenMostrar)
+def ingresar(u: UsuarioLogin):
+    nombre_input = u.nombre
+    contraseña = u.contraseña
+
+    conexion = psycopg2.connect(str_conexion)
+    cursor = conexion.cursor()
+
+    consulta = "SELECT id, activo, hash_password FROM usuarios WHERE nombre = %s"
+    cursor.execute(consulta, (nombre_input,))
+
+    resultado = cursor.fetchone()
+    id_obtenida = resultado[0] if resultado else None
+    activo_obtenido = resultado[1] if resultado else None
+    hash_obtenida = resultado[2] if resultado else None
+
+    error_credenciales_incorrectas = HTTPException(status_code=401, detail="Credenciales incorrectas")
+    if id_obtenida == None:
+        raise error_credenciales_incorrectas
+    
+    if activo_obtenido == False:
+        raise HTTPException(status_code=401, detail="Usuario inactivo, no puede ingresar")
+
+    if pwd_context.verify(contraseña, hash_obtenida):
+        token = crear_token_acceso(id_obtenida, activo_obtenido)
+        return TokenMostrar(
+            acceso_token=token,
+            tipo_token="bearer"
+        )
+    
+    raise error_credenciales_incorrectas

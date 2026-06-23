@@ -10,3 +10,7 @@ class UsuarioLeer(BaseModel):
     nombre: str
     telefono: str
     activo: bool
+
+class UsuarioLogin(BaseModel):
+    nombre: str
+    contraseña: str

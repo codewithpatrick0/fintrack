@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
-import psycopg2
-from conexion import str_conexion
+from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
 from usuarios_modelo import UsuarioCrear, UsuarioLeer, UsuarioLogin
 from token_modelo import TokenMostrar
@@ -18,17 +17,18 @@ pwd_context = CryptContext(schemes=["argon2"], deprecated='auto')
 @app.get('/transacciones', response_model=list[TransaccionLeer])
 def obtener_transacciones():
 
-    conexion = psycopg2.connect(str_conexion)
-    cursor = conexion.cursor()
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
 
-    consulta = """SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info 
-                FROM transacciones t
-                JOIN usuarios u ON u.id = t.id_usuario
-                WHERE u.activo = true;
-                """
+        consulta = """SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info
+                    FROM transacciones t
+                    JOIN usuarios u ON u.id = t.id_usuario
+                    WHERE u.activo = true;
+                    """
 
-    cursor.execute(consulta)
-    filas = cursor.fetchall()
+        cursor.execute(consulta)
+        filas = cursor.fetchall()
+        cursor.close()
 
     transacciones = [TransaccionLeer(
         id=fila[0],
@@ -41,14 +41,11 @@ def obtener_transacciones():
         )
     for fila in filas]
 
-    cursor.close()
-    conexion.close()
-    
     return transacciones
 
-@app.post('/transacciones', response_model=TransaccionLeer) #sale
-def crear_transaccion(transaccion: TransaccionCrear): #entra
-    
+@app.post('/transacciones', response_model=TransaccionLeer)
+def crear_transaccion(transaccion: TransaccionCrear):
+
     id_usuario_input = transaccion.id_usuario
     id_categoria_input = transaccion.id_categoria
     tipo_movimiento_input = transaccion.tipo_movimiento
@@ -58,26 +55,25 @@ def crear_transaccion(transaccion: TransaccionCrear): #entra
 
     if monto_input <= 0:
         raise HTTPException(status_code=400, detail="El monto debe ser mayor a 0")
-    
+
     if id_categoria_input is None:
         raise HTTPException(status_code=400, detail="La categoria no puede estar vacía")
-    
+
     if tipo_movimiento_input not in ['gasto', 'ingreso', 'ahorro']:
         raise HTTPException(status_code=400, detail="El tipo de movimiento ingresado no es válido")
-    conexion = psycopg2.connect(str_conexion)
-    cursor = conexion.cursor()
 
-    cursor.execute("""
-        INSERT INTO transacciones(id_usuario, id_categoria, tipo_movimiento, monto, fuente, info)
-        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
-    """, (id_usuario_input, id_categoria_input, tipo_movimiento_input,
-            monto_input, fuente_input, info_input))
-    resultado = cursor.fetchone()
-    id_asignado = resultado[0] if resultado else None
-    conexion.commit()
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
 
-    cursor.close()
-    conexion.close()
+        cursor.execute("""
+            INSERT INTO transacciones(id_usuario, id_categoria, tipo_movimiento, monto, fuente, info)
+            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
+        """, (id_usuario_input, id_categoria_input, tipo_movimiento_input,
+                monto_input, fuente_input, info_input))
+        resultado = cursor.fetchone()
+        id_asignado = resultado[0] if resultado else None
+        
+        cursor.close()
 
     return TransaccionLeer(
         id=id_asignado,
@@ -92,20 +88,18 @@ def crear_transaccion(transaccion: TransaccionCrear): #entra
 @app.get('/usuarios/{id_user}/transacciones', response_model=list[TransaccionLeer])
 def obtener_transacciones_por_id(id_user: int):
 
-    conexion = psycopg2.connect(str_conexion)
-    cursor = conexion.cursor()
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
 
-    consulta = """ SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info 
-                FROM transacciones t
-                JOIN usuarios u ON u.id = t.id_usuario
-                WHERE u.activo = true AND t.id_usuario = %s
-                """
-    
-    cursor.execute(consulta, (id_user,))
-    resultados = cursor.fetchall()
+        consulta = """ SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info
+                    FROM transacciones t
+                    JOIN usuarios u ON u.id = t.id_usuario
+                    WHERE u.activo = true AND t.id_usuario = %s
+                    """
 
-    cursor.close()
-    conexion.close()
+        cursor.execute(consulta, (id_user,))
+        resultados = cursor.fetchall()
+        cursor.close()
 
     if resultados:
         transacciones = [TransaccionLeer(
@@ -119,7 +113,7 @@ def obtener_transacciones_por_id(id_user: int):
         )
         for r in resultados]
         return transacciones
-    
+
     return []
 
 @app.post('/usuarios/registro', response_model=UsuarioLeer)
@@ -128,35 +122,30 @@ def registrar_usuario(u: UsuarioCrear):
     nombre_input = u.nombre
     telefono_input = u.telefono
     contraseña = u.contraseña
-    
+
     if len(nombre_input) < 3 or len(nombre_input) > 12:
         raise HTTPException(status_code=400, detail='El nombre supera el límite de caractéres')
-    
+
     if not nombre_input.strip().replace(" ","").isalpha():
         raise HTTPException(status_code=400, detail='El nombre contiene caractéres inválidos')
-    
+
     if len(telefono_input) != 9 or not telefono_input.isdigit():
         raise HTTPException(status_code=400, detail='Teléfono inválido')
-    
+
     contraseña_hasheada = pwd_context.hash(contraseña)
 
-    conexion = psycopg2.connect(str_conexion)
-    cursor = conexion.cursor()
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
 
-    consulta = """
-                    INSERT INTO usuarios (nombre, telefono, hash_password)
-                    VALUES (%s, %s, %s) RETURNING id;
-                """
+        consulta = """
+                        INSERT INTO usuarios (nombre, telefono, hash_password)
+                        VALUES (%s, %s, %s) RETURNING id;
+                    """
 
-    cursor.execute(consulta, (nombre_input, telefono_input, contraseña_hasheada))
-    resultado = cursor.fetchone()
-    id_asignado = resultado[0] if resultado else None
-    
-    conexion.commit()
-
-    cursor.close()
-    conexion.close()
-
+        cursor.execute(consulta, (nombre_input, telefono_input, contraseña_hasheada))
+        resultado = cursor.fetchone()
+        id_asignado = resultado[0] if resultado else None
+        cursor.close()
 
     return UsuarioLeer(
         id=id_asignado,
@@ -165,7 +154,6 @@ def registrar_usuario(u: UsuarioCrear):
         activo=True
     )
 
-#Para endpoint login
 def crear_token_acceso(id: int, activo: bool) -> str:
     payload = {
         "sub": str(id),
@@ -179,21 +167,22 @@ def ingresar(u: UsuarioLogin):
     nombre_input = u.nombre
     contraseña = u.contraseña
 
-    conexion = psycopg2.connect(str_conexion)
-    cursor = conexion.cursor()
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
 
-    consulta = "SELECT id, activo, hash_password FROM usuarios WHERE nombre = %s"
-    cursor.execute(consulta, (nombre_input,))
+        consulta = "SELECT id, activo, hash_password FROM usuarios WHERE nombre = %s"
+        cursor.execute(consulta, (nombre_input,))
 
-    resultado = cursor.fetchone()
-    id_obtenida = resultado[0] if resultado else None
-    activo_obtenido = resultado[1] if resultado else None
-    hash_obtenida = resultado[2] if resultado else None
+        resultado = cursor.fetchone()
+        id_obtenida = resultado[0] if resultado else None
+        activo_obtenido = resultado[1] if resultado else None
+        hash_obtenida = resultado[2] if resultado else None
+        cursor.close()
 
     error_credenciales_incorrectas = HTTPException(status_code=401, detail="Credenciales incorrectas")
     if id_obtenida == None:
         raise error_credenciales_incorrectas
-    
+
     if activo_obtenido == False:
         raise HTTPException(status_code=401, detail="Usuario inactivo, no puede ingresar")
 
@@ -203,5 +192,5 @@ def ingresar(u: UsuarioLogin):
             acceso_token=token,
             tipo_token="bearer"
         )
-    
+
     raise error_credenciales_incorrectas

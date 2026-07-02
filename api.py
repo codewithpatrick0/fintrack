@@ -13,6 +13,9 @@ app = FastAPI()
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated='auto')
 
+@app.get("/")
+def read_root():
+    return {"message": "Fintrack FastApi Activa"}
 
 @app.get('/transacciones', response_model=list[TransaccionLeer])
 def obtener_transacciones(id_user: int = Depends(verificar_token_acceso)):

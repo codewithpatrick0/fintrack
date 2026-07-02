@@ -1,11 +1,11 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
 from usuarios_modelo import UsuarioCrear, UsuarioLeer, UsuarioLogin
 from token_modelo import TokenMostrar
 from passlib.context import CryptContext
-from funciones_tokens import crear_token_acceso
+from funciones_tokens import crear_token_acceso,verificar_token_acceso
 import jwt
 
 
@@ -15,7 +15,7 @@ pwd_context = CryptContext(schemes=["argon2"], deprecated='auto')
 
 
 @app.get('/transacciones', response_model=list[TransaccionLeer])
-def obtener_transacciones():
+def obtener_transacciones(id_user: int = Depends(verificar_token_acceso)):
 
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
@@ -44,7 +44,7 @@ def obtener_transacciones():
     return transacciones
 
 @app.post('/transacciones', response_model=TransaccionLeer)
-def crear_transaccion(transaccion: TransaccionCrear):
+def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(verificar_token_acceso)):
 
     id_usuario_input = transaccion.id_usuario
     id_categoria_input = transaccion.id_categoria
@@ -85,8 +85,8 @@ def crear_transaccion(transaccion: TransaccionCrear):
         info=info_input
     )
 
-@app.get('/usuarios/{id_user}/transacciones', response_model=list[TransaccionLeer])
-def obtener_transacciones_por_id(id_user: int):
+@app.get('/usuarios/{id_tarnsaccion_user}/transacciones', response_model=list[TransaccionLeer])
+def obtener_transacciones_por_id(id_transaccion_user: int, id_user: int = Depends(verificar_token_acceso)):
 
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
@@ -97,7 +97,7 @@ def obtener_transacciones_por_id(id_user: int):
                     WHERE u.activo = true AND t.id_usuario = %s
                     """
 
-        cursor.execute(consulta, (id_user,))
+        cursor.execute(consulta, (id_transaccion_user,))
         resultados = cursor.fetchall()
         cursor.close()
 
@@ -156,9 +156,10 @@ def registrar_usuario(u: UsuarioCrear):
 
 
 @app.post('/login', response_model=TokenMostrar)
-def ingresar(u: UsuarioLogin):
-    nombre_input = u.nombre
-    contraseña = u.contraseña
+def ingresar(form_data: OAuth2PasswordRequestForm = Depends()):
+    
+    nombre_input = form_data.username
+    pass_input = form_data.password
 
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
@@ -173,17 +174,17 @@ def ingresar(u: UsuarioLogin):
         cursor.close()
 
     error_credenciales_incorrectas = HTTPException(status_code=401, detail="Credenciales incorrectas")
-    if id_obtenida == None:
+    if id_obtenida is None:
         raise error_credenciales_incorrectas
 
-    if activo_obtenido == False:
+    if not activo_obtenido:
         raise HTTPException(status_code=401, detail="Usuario inactivo, no puede ingresar")
 
-    if pwd_context.verify(contraseña, hash_obtenida):
+    if pwd_context.verify(pass_input, hash_obtenida):
         token = crear_token_acceso(id_obtenida, activo_obtenido)
         return TokenMostrar(
-            acceso_token=token,
-            tipo_token="bearer"
+            access_token=token,
+            token_type="bearer"
         )
 
     raise error_credenciales_incorrectas

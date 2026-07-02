@@ -1,11 +1,11 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.security import OAuth2PasswordBearer
 from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
 from usuarios_modelo import UsuarioCrear, UsuarioLeer, UsuarioLogin
 from token_modelo import TokenMostrar
 from passlib.context import CryptContext
-from credenciales_login import SECRET_KEY, ALGORITHM
-from datetime import datetime, timezone, timedelta
+from funciones_tokens import crear_token_acceso
 import jwt
 
 
@@ -72,7 +72,7 @@ def crear_transaccion(transaccion: TransaccionCrear):
                 monto_input, fuente_input, info_input))
         resultado = cursor.fetchone()
         id_asignado = resultado[0] if resultado else None
-        
+
         cursor.close()
 
     return TransaccionLeer(
@@ -154,13 +154,6 @@ def registrar_usuario(u: UsuarioCrear):
         activo=True
     )
 
-def crear_token_acceso(id: int, activo: bool) -> str:
-    payload = {
-        "sub": str(id),
-        "activo": activo,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 @app.post('/login', response_model=TokenMostrar)
 def ingresar(u: UsuarioLogin):

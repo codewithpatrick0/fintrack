@@ -6,6 +6,8 @@ import logging
 from fastapi import HTTPException
 
 logging.basicConfig(level=logging.INFO)
+
+#Creación del objeto
 logger = logging.getLogger(__name__)
 
 load_dotenv()

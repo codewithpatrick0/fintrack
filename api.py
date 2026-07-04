@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
 from usuarios_modelo import UsuarioCrear, UsuarioLeer
@@ -8,7 +8,8 @@ from passlib.context import CryptContext
 from funciones_tokens import crear_token_acceso,verificar_token_acceso
 import psycopg2
 import logging
-from balance_modelo import BalanceMostrar, BalancePedir, Desglose
+from balance_modelo import BalanceMostrar, Desglose
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -209,17 +210,12 @@ def ingresar(form_data: OAuth2PasswordRequestForm = Depends()):
         )
 
     raise error_credenciales_incorrectas
-"""
-@app.get('/balance', response_model=list[BalanceMostrar])
-def obtener_balance(b: BalancePedir, id_user: int = Depends(verificar_token_acceso)):
-    fecha_inicio = b.fecha_inicio
-    fecha_final = b.fecha_final
 
+@app.get('/balance', response_model=BalanceMostrar)
+def obtener_balance(fecha_inicio: datetime, fecha_final: datetime, id_user: int = Depends(verificar_token_acceso)):
+    
     if fecha_inicio > fecha_final:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La fecha de inicio no puede ser posterior a la fecha final."
-        )
+        raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha final.")
 
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
@@ -240,8 +236,9 @@ def obtener_balance(b: BalancePedir, id_user: int = Depends(verificar_token_acce
             
                 if tipo_movimiento == "gasto":
                     balance -= total
-                desglose.append(Desglose(tipo_movimiento, total))
+                desglose.append(Desglose(tipo_movimiento=tipo_movimiento, monto_total=total))
             
-        return BalanceMostrar(desglose, balance)
-    """
-        
+            return BalanceMostrar(desglose=desglose, balance=balance)
+    
+        return BalanceMostrar(desglose=[], balance=0.0)
+    

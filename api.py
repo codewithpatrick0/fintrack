@@ -10,6 +10,7 @@ import psycopg2
 import logging
 from balance_modelo import BalanceMostrar, Desglose
 from datetime import datetime
+from categorias_modelo import CategoriaMostrar, CategoriaCrear
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -241,4 +242,46 @@ def obtener_balance(fecha_inicio: datetime, fecha_final: datetime, id_user: int 
             return BalanceMostrar(desglose=desglose, balance=balance)
     
         return BalanceMostrar(desglose=[], balance=0.0)
+@app.get('/categorias', response_model=list[CategoriaMostrar])
+def mostrar_categorias(id: int = Depends(verificar_token_acceso)):
+
+    consulta = "SELECT id, id_usuario, nombre_categoria FROM categorias WHERE id_usuario IS NULL OR id_usuario = %s"
     
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(consulta, (id,))
+
+        resultados = cursor.fetchall()
+    
+        categorias = [CategoriaMostrar(
+            id=r[0],
+            id_usuario=r[1],
+            nombre_categoria=r[2]
+        ) for r in resultados]
+
+        return categorias
+
+@app.post('/categorias', response_model= CategoriaMostrar)
+def crear_categoria(c: CategoriaCrear, id: int = Depends(verificar_token_acceso)):
+
+    nombre_categoria_input = c.nombre_categoria
+
+    consulta = "INSERT INTO categorias(id_usuario, nombre_categoria) VALUES (%s, %s) RETURNING id;"
+    valores = [id, nombre_categoria_input]
+
+    try:
+        with obtener_conexion() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(consulta, valores)
+            resultados = cursor.fetchone()
+
+            id_obtenido = resultados[0] if resultados else None
+
+            return CategoriaMostrar(
+                id=id_obtenido,
+                id_usuario=id,
+                nombre_categoria=nombre_categoria_input
+            )
+        
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=400, detail='El nombre de la categoría que ingresó ya existe')

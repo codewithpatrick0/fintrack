@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+import datetime
 
 class TransaccionLeer(BaseModel):
     id: int
@@ -8,6 +9,7 @@ class TransaccionLeer(BaseModel):
     monto: float
     fuente: str | None=None
     info: str | None=None
+    fecha: datetime.datetime | None=None
 
 class TransaccionCrear(BaseModel):
     id_usuario: int
@@ -16,3 +18,4 @@ class TransaccionCrear(BaseModel):
     monto: float
     fuente: str | None = None
     info: str | None = None
+    fecha: datetime.datetime | None=None

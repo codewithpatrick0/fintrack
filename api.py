@@ -2,12 +2,16 @@ from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
-from usuarios_modelo import UsuarioCrear, UsuarioLeer, UsuarioLogin
+from usuarios_modelo import UsuarioCrear, UsuarioLeer
 from token_modelo import TokenMostrar
 from passlib.context import CryptContext
 from funciones_tokens import crear_token_acceso,verificar_token_acceso
-import jwt
+import psycopg2
+import logging
+from balance_modelo import BalanceMostrar, BalancePedir, Desglose
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -23,7 +27,7 @@ def obtener_transacciones(id_user: int = Depends(verificar_token_acceso)):
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
 
-        consulta = """SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info
+        consulta = """SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info, t.fecha
                     FROM transacciones t
                     JOIN usuarios u ON u.id = t.id_usuario
                     WHERE u.activo = true;
@@ -40,7 +44,8 @@ def obtener_transacciones(id_user: int = Depends(verificar_token_acceso)):
         tipo_movimiento=fila[3],
         monto=fila[4],
         fuente=fila[5],
-        info=fila[6]
+        info=fila[6],
+        fecha=fila[7]
         )
     for fila in filas]
 
@@ -55,6 +60,7 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
     monto_input = transaccion.monto
     fuente_input = transaccion.fuente
     info_input = transaccion.info
+    fecha_input = transaccion.fecha #None
 
     if monto_input <= 0:
         raise HTTPException(status_code=400, detail="El monto debe ser mayor a 0")
@@ -68,15 +74,20 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
 
-        cursor.execute("""
-            INSERT INTO transacciones(id_usuario, id_categoria, tipo_movimiento, monto, fuente, info)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
-        """, (id_usuario_input, id_categoria_input, tipo_movimiento_input,
-                monto_input, fuente_input, info_input))
+        columnas = ["id_usuario", "id_categoria", "tipo_movimiento", "monto", "fuente", "info"]
+        valores = [id_usuario_input, id_categoria_input, tipo_movimiento_input, monto_input, fuente_input,info_input]
+
+        if fecha_input is not None:
+            columnas.append("fecha")
+            valores.append(fecha_input)
+            
+
+        consulta = f"INSERT INTO transacciones ({', '.join(columnas)}) VALUES ({', '.join(['%s'] * len(valores))}) RETURNING id, fecha"
+
+        cursor.execute(consulta, valores)
         resultado = cursor.fetchone()
         id_asignado = resultado[0] if resultado else None
-
-        cursor.close()
+        fecha_recibida = resultado[1] if resultado else None
 
     return TransaccionLeer(
         id=id_asignado,
@@ -85,22 +96,23 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
         tipo_movimiento=tipo_movimiento_input,
         monto=monto_input,
         fuente=fuente_input,
-        info=info_input
+        info=info_input,
+        fecha=fecha_recibida
     )
 
-@app.get('/usuarios/{id_tarnsaccion_user}/transacciones', response_model=list[TransaccionLeer])
-def obtener_transacciones_por_id(id_transaccion_user: int, id_user: int = Depends(verificar_token_acceso)):
+@app.get('/usuarios/mis-transacciones', response_model=list[TransaccionLeer])
+def obtener_transacciones_por_id(id_user: int = Depends(verificar_token_acceso)):
 
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
 
-        consulta = """ SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info
+        consulta = """ SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info, t.fecha
                     FROM transacciones t
                     JOIN usuarios u ON u.id = t.id_usuario
                     WHERE u.activo = true AND t.id_usuario = %s
                     """
 
-        cursor.execute(consulta, (id_transaccion_user,))
+        cursor.execute(consulta, (id_user,))
         resultados = cursor.fetchall()
         cursor.close()
 
@@ -112,7 +124,8 @@ def obtener_transacciones_por_id(id_transaccion_user: int, id_user: int = Depend
             tipo_movimiento=r[3],
             monto=r[4],
             fuente=r[5],
-            info=r[6]
+            info=r[6],
+            fecha=r[7]
         )
         for r in resultados]
         return transacciones
@@ -123,6 +136,7 @@ def obtener_transacciones_por_id(id_transaccion_user: int, id_user: int = Depend
 def registrar_usuario(u: UsuarioCrear):
 
     nombre_input = u.nombre
+    nombre_usuario_input = u.nombre_usuario
     telefono_input = u.telefono
     contraseña = u.contraseña
 
@@ -137,38 +151,42 @@ def registrar_usuario(u: UsuarioCrear):
 
     contraseña_hasheada = pwd_context.hash(contraseña)
 
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    try:
+        with obtener_conexion() as conexion:
+            cursor = conexion.cursor()
 
-        consulta = """
-                        INSERT INTO usuarios (nombre, telefono, hash_password)
-                        VALUES (%s, %s, %s) RETURNING id;
-                    """
+            consulta = """
+                            INSERT INTO usuarios (nombre, nombre_usuario, telefono, hash_password)
+                            VALUES (%s, %s, %s, %s) RETURNING id;
+                        """
 
-        cursor.execute(consulta, (nombre_input, telefono_input, contraseña_hasheada))
-        resultado = cursor.fetchone()
-        id_asignado = resultado[0] if resultado else None
-        cursor.close()
+            cursor.execute(consulta, (nombre_input, nombre_usuario_input, telefono_input, contraseña_hasheada))
+            resultado = cursor.fetchone()
+            id_asignado = resultado[0] if resultado else None
+            cursor.close()
 
-    return UsuarioLeer(
-        id=id_asignado,
-        nombre=nombre_input,
-        telefono=telefono_input,
-        activo=True
-    )
-
+        return UsuarioLeer(
+            id=id_asignado,
+            nombre=nombre_input,
+            nombre_usuario=nombre_usuario_input,
+            telefono=telefono_input,
+            activo=True
+        )
+    except psycopg2.errors.UniqueViolation as e: # Retorna psycopg2.errors.UniqueViolation 
+        logger.info(f"Error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail='Nombre de usuario o teléfono ya existente')
 
 @app.post('/login', response_model=TokenMostrar)
 def ingresar(form_data: OAuth2PasswordRequestForm = Depends()):
     
-    nombre_input = form_data.username
+    nombre_usuario_input = form_data.username
     pass_input = form_data.password
 
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
 
-        consulta = "SELECT id, activo, hash_password FROM usuarios WHERE nombre = %s"
-        cursor.execute(consulta, (nombre_input,))
+        consulta = "SELECT id, activo, hash_password FROM usuarios WHERE nombre_usuario = %s"
+        cursor.execute(consulta, (nombre_usuario_input,))
 
         resultado = cursor.fetchone()
         id_obtenida = resultado[0] if resultado else None
@@ -191,3 +209,39 @@ def ingresar(form_data: OAuth2PasswordRequestForm = Depends()):
         )
 
     raise error_credenciales_incorrectas
+"""
+@app.get('/balance', response_model=list[BalanceMostrar])
+def obtener_balance(b: BalancePedir, id_user: int = Depends(verificar_token_acceso)):
+    fecha_inicio = b.fecha_inicio
+    fecha_final = b.fecha_final
+
+    if fecha_inicio > fecha_final:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La fecha de inicio no puede ser posterior a la fecha final."
+        )
+
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
+
+        consulta = "SELECT tipo_movimiento, SUM(monto) AS Total FROM transacciones WHERE id_usuario = %s AND fecha BETWEEN %s AND %s GROUP BY tipo_movimiento;"
+        cursor.execute(consulta, (id_user, fecha_inicio, fecha_final))
+        resultado = cursor.fetchall()
+
+        balance = 0
+        desglose = []
+        if resultado:
+            for r in resultado:
+                tipo_movimiento = r[0]
+                total= r[1]
+
+                if tipo_movimiento == "ingreso":
+                    balance += total
+            
+                if tipo_movimiento == "gasto":
+                    balance -= total
+                desglose.append(Desglose(tipo_movimiento, total))
+            
+        return BalanceMostrar(desglose, balance)
+    """
+        

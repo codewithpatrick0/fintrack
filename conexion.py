@@ -22,6 +22,11 @@ def obtener_conexion():
         
         #Al volver guardamos cambios si se realizó la acción correctamente
         conexion.commit()
+
+    except psycopg2.errors.UniqueViolation: # Esto evalua el psycopg2.errors retornado de la función de registro
+        conexion.rollback()
+        raise 
+
     except Exception as e:
         logger.error(f"Error en la base de datos: {e}", exc_info=True)
         #Revierte cambios si en caso no se pudo realizar de manera corercta la acción

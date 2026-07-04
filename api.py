@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
@@ -10,7 +10,7 @@ import psycopg2
 import logging
 from balance_modelo import BalanceMostrar, Desglose
 from datetime import datetime
-from categorias_modelo import CategoriaMostrar, CategoriaCrear
+from categorias_modelo import CategoriaMostrar, CategoriaCrear, CategoriaEditar
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -242,10 +242,11 @@ def obtener_balance(fecha_inicio: datetime, fecha_final: datetime, id_user: int 
             return BalanceMostrar(desglose=desglose, balance=balance)
     
         return BalanceMostrar(desglose=[], balance=0.0)
+    
 @app.get('/categorias', response_model=list[CategoriaMostrar])
 def mostrar_categorias(id: int = Depends(verificar_token_acceso)):
 
-    consulta = "SELECT id, id_usuario, nombre_categoria FROM categorias WHERE id_usuario IS NULL OR id_usuario = %s"
+    consulta = "SELECT id, id_usuario, nombre_categoria FROM categorias WHERE (id_usuario IS NULL OR id_usuario = %s) AND activo = TRUE;"
     
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
@@ -284,4 +285,50 @@ def crear_categoria(c: CategoriaCrear, id: int = Depends(verificar_token_acceso)
             )
         
     except psycopg2.errors.UniqueViolation:
-        raise HTTPException(status_code=400, detail='El nombre de la categoría que ingresó ya existe')
+        raise HTTPException(status_code=400, detail='Ya tienes una categoría creada con ese nombre')
+    
+@app.put('/categorias', response_model=CategoriaMostrar)
+def editar_categoria(c: CategoriaEditar, id_user: int = Depends(verificar_token_acceso)):
+    nombre_a_buscar = c.nombre_categoria
+    nuevo_nombre = c.nuevo_nombre_categoria
+    consulta = "UPDATE categorias SET nombre_categoria = %s WHERE nombre_categoria = %s AND id_usuario = %s RETURNING id;"
+
+    with obtener_conexion() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(consulta, (nuevo_nombre, nombre_a_buscar, id_user))
+
+        resultado = cursor.fetchone()
+
+        if not resultado:
+            raise HTTPException(status_code=404, detail='La categoría no existe o no te pertenece')
+        
+        id_extraido = resultado[0] if resultado else None
+
+        return CategoriaMostrar(
+            id=id_extraido,
+            id_usuario=id_user,
+            nombre_categoria=nuevo_nombre
+        )
+    
+@app.delete('/categorias/{nombre}')
+def eliminar_categoria(nombre:str, id: int = Depends(verificar_token_acceso)):
+
+    consulta_one = """
+                    UPDATE transacciones AS t SET id_categoria = 6
+                    FROM categorias AS c WHERE t.id_categoria = c.id AND
+                    c.nombre_categoria = %s AND t.id_usuario = %s;
+                    """
+    consulta_two = """UPDATE categorias SET activo = FALSE WHERE activo = TRUE 
+                    AND (nombre_categoria = %s  AND id_usuario = %s) RETURNING nombre_categoria;
+                    """
+    valores = [nombre, id]
+    with obtener_conexion() as conexion:
+        cursor =conexion.cursor()
+        cursor.execute(consulta_one, valores)
+        cursor.execute(consulta_two, valores)
+        resultado = cursor.fetchone()
+
+        if resultado is None:
+            raise HTTPException(status_code=404, detail='El nombre de la categoria no existe')
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)

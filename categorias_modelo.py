@@ -7,3 +7,8 @@ class CategoriaMostrar(BaseModel):
 
 class CategoriaCrear(BaseModel):
     nombre_categoria: str
+
+class CategoriaEditar(BaseModel):
+    nombre_categoria: str
+    nuevo_nombre_categoria: str
+

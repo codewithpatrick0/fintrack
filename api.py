@@ -313,19 +313,30 @@ def editar_categoria(c: CategoriaEditar, id_user: int = Depends(verificar_token_
 @app.delete('/categorias/{nombre}')
 def eliminar_categoria(nombre:str, id: int = Depends(verificar_token_acceso)):
 
+    consulta_id_sin_categoria = """
+                    SELECT id FROM categorias WHERE nombre_categoria = 'Sin categoria' AND id_usuario IS NULL;
+                            """
     consulta_one = """
-                    UPDATE transacciones AS t SET id_categoria = 6
+                    UPDATE transacciones AS t SET id_categoria = %s
                     FROM categorias AS c WHERE t.id_categoria = c.id AND
                     c.nombre_categoria = %s AND t.id_usuario = %s;
                     """
     consulta_two = """UPDATE categorias SET activo = FALSE WHERE activo = TRUE 
                     AND (nombre_categoria = %s  AND id_usuario = %s) RETURNING nombre_categoria;
                     """
-    valores = [nombre, id]
+    
     with obtener_conexion() as conexion:
         cursor =conexion.cursor()
-        cursor.execute(consulta_one, valores)
-        cursor.execute(consulta_two, valores)
+        cursor.execute(consulta_id_sin_categoria)
+        resultado = cursor.fetchone()
+        id_sin_categoria=resultado[0] if resultado else None
+
+        valores_one = [id_sin_categoria, nombre, id]
+        valores_two = [nombre, id]
+
+        cursor.execute(consulta_one, valores_one)
+
+        cursor.execute(consulta_two, valores_two)
         resultado = cursor.fetchone()
 
         if resultado is None:

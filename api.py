@@ -102,38 +102,6 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
         fecha=fecha_recibida
     )
 
-@app.get('/usuarios/mis-transacciones', response_model=list[TransaccionLeer])
-def obtener_transacciones_por_id(id_user: int = Depends(verificar_token_acceso)):
-
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
-
-        consulta = """ SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info, t.fecha
-                    FROM transacciones t
-                    JOIN usuarios u ON u.id = t.id_usuario
-                    WHERE u.activo = true AND t.id_usuario = %s
-                    """
-
-        cursor.execute(consulta, (id_user,))
-        resultados = cursor.fetchall()
-        cursor.close()
-
-    if resultados:
-        transacciones = [TransaccionLeer(
-            id=r[0],
-            id_usuario=r[1],
-            id_categoria=r[2],
-            tipo_movimiento=r[3],
-            monto=r[4],
-            fuente=r[5],
-            info=r[6],
-            fecha=r[7]
-        )
-        for r in resultados]
-        return transacciones
-
-    return []
-
 @app.post('/usuarios/registro', response_model=UsuarioLeer)
 def registrar_usuario(u: UsuarioCrear):
 

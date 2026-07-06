@@ -24,34 +24,66 @@ def read_root():
     return {"message": "Fintrack FastApi Activa"}
 
 @app.get('/transacciones', response_model=list[TransaccionLeer])
-def obtener_transacciones(id_user: int = Depends(verificar_token_acceso)):
+def obtener_transacciones(tipo_movimiento: str | None=None,
+                            id_categoria: int | None=None,
+                            page: int = 1,
+                            page_size: int = 10,
+                            id_user: int = Depends(verificar_token_acceso)):
+    
+    #str de limite y lista de valores dinámica
+    limite = " ORDER BY id DESC LIMIT %s OFFSET %s;"
+    valores = [id_user]
 
+    offset = (page - 1) * page_size
+    
+    consulta_principal = """
+                SELECT id, id_usuario, id_categoria, tipo_movimiento, monto, fuente, info, fecha FROM transacciones 
+                WHERE id_usuario = %s
+                """
+    
+    consulta_categoria = "SELECT id FROM categorias WHERE id = %s;"
+
+    if tipo_movimiento:
+        if tipo_movimiento not in ["ingreso", "gasto", "ahorro"]:
+            raise HTTPException(status_code=400, detail='El tipo de movimiento es inválido, ingresa otro')
+        else:
+            consulta_principal += " AND tipo_movimiento = %s"
+            valores.append(tipo_movimiento)
+
+    
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
+        if id_categoria:
+            cursor.execute(consulta_categoria, (id_categoria,))
+            resultado = cursor.fetchone()
 
-        consulta = """SELECT t.id, t.id_usuario, t.id_categoria, t.tipo_movimiento, t.monto, t.fuente, t.info, t.fecha
-                    FROM transacciones t
-                    JOIN usuarios u ON u.id = t.id_usuario
-                    WHERE u.activo = true;
-                    """
+            id_categoria_obtenida = resultado[0] if resultado else None
 
-        cursor.execute(consulta)
-        filas = cursor.fetchall()
-        cursor.close()
+            if not id_categoria_obtenida:   
+                raise HTTPException(status_code=400, detail='La categoria ingresada no existe')
 
-    transacciones = [TransaccionLeer(
-        id=fila[0],
-        id_usuario=fila[1],
-        id_categoria=fila[2],
-        tipo_movimiento=fila[3],
-        monto=fila[4],
-        fuente=fila[5],
-        info=fila[6],
-        fecha=fila[7]
-        )
-    for fila in filas]
+            if id_categoria_obtenida:     
+                consulta_principal += " AND id_categoria = %s"
+                valores.append(id_categoria_obtenida)
 
-    return transacciones
+        consulta_principal += limite
+        valores.extend([page_size, offset])
+
+        cursor.execute(consulta_principal, valores)
+        resultados = cursor.fetchall()
+
+        transacciones = [TransaccionLeer(
+            id=r[0],
+            id_usuario=r[1],
+            id_categoria=r[2],
+            tipo_movimiento=r[3],
+            monto=r[4],
+            fuente=r[5],
+            info=r[6],
+            fecha=r[7]
+        ) for r in resultados]
+
+        return transacciones
 
 @app.post('/transacciones', response_model=TransaccionLeer)
 def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(verificar_token_acceso)):

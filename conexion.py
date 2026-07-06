@@ -22,6 +22,10 @@ def obtener_conexion():
         
         #Al volver guardamos cambios si se realizó la acción correctamente
         conexion.commit()
+        
+    except HTTPException:
+        conexion.rollback()
+        raise
 
     except psycopg2.errors.UniqueViolation: # Esto evalua el psycopg2.errors retornado de la función de registro
         conexion.rollback()

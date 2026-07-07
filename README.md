@@ -31,10 +31,11 @@ Make sure you have Docker installed.
 
 **Required environment variables** (create a `.env` file in the project root):
 
+```ini
 STRING_NEON_FINTRACK=your_postgresql_connection_string
 SECRET_KEY=your_jwt_secret_key
 ALGORITHM=HS256
-
+```
 **Steps:**
 
 1. Clone the repository

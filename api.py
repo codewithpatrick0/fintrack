@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.concurrency import run_in_threadpool
 from conexion import obtener_conexion
 from transacciones_modelo import TransaccionLeer, TransaccionCrear
 from usuarios_modelo import UsuarioCrear, UsuarioLeer
@@ -101,7 +102,8 @@ async def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depend
         raise HTTPException(status_code=400, detail="El monto debe ser mayor a 0")
 
     if id_categoria_input is None:
-        respuesta = await deducir_categoria(info_input, obtener_categorias_usuario(id_user))
+        lista_categorias = await run_in_threadpool(obtener_categorias_usuario, id_user)
+        respuesta = await deducir_categoria(info_input, lista_categorias)
         id_categoria_input = respuesta.get("id_categoria")
 
     if tipo_movimiento_input not in ['gasto', 'ingreso', 'ahorro']:

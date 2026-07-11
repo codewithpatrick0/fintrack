@@ -11,6 +11,8 @@ import logging
 from balance_modelo import BalanceMostrar, Desglose
 from datetime import datetime
 from categorias_modelo import CategoriaMostrar, CategoriaCrear, CategoriaEditar
+from services.categorizer import deducir_categoria
+from funciones_categorias import obtener_categorias_usuario
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -86,9 +88,8 @@ def obtener_transacciones(tipo_movimiento: str | None=None,
         return transacciones
 
 @app.post('/transacciones', response_model=TransaccionLeer)
-def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(verificar_token_acceso)):
+async def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(verificar_token_acceso)):
 
-    id_usuario_input = transaccion.id_usuario
     id_categoria_input = transaccion.id_categoria
     tipo_movimiento_input = transaccion.tipo_movimiento
     monto_input = transaccion.monto
@@ -100,7 +101,8 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
         raise HTTPException(status_code=400, detail="El monto debe ser mayor a 0")
 
     if id_categoria_input is None:
-        raise HTTPException(status_code=400, detail="La categoria no puede estar vacía")
+        respuesta = await deducir_categoria(info_input, obtener_categorias_usuario(id_user))
+        id_categoria_input = respuesta.get("id_categoria")
 
     if tipo_movimiento_input not in ['gasto', 'ingreso', 'ahorro']:
         raise HTTPException(status_code=400, detail="El tipo de movimiento ingresado no es válido")
@@ -109,7 +111,7 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
         cursor = conexion.cursor()
 
         columnas = ["id_usuario", "id_categoria", "tipo_movimiento", "monto", "fuente", "info"]
-        valores = [id_usuario_input, id_categoria_input, tipo_movimiento_input, monto_input, fuente_input,info_input]
+        valores = [id_user, id_categoria_input, tipo_movimiento_input, monto_input, fuente_input,info_input]
 
         if fecha_input is not None:
             columnas.append("fecha")
@@ -125,7 +127,7 @@ def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(veri
 
     return TransaccionLeer(
         id=id_asignado,
-        id_usuario=id_usuario_input,
+        id_usuario=id_user,
         id_categoria=id_categoria_input,
         tipo_movimiento=tipo_movimiento_input,
         monto=monto_input,

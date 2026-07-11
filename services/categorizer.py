@@ -4,7 +4,6 @@ import sys
 from dotenv import load_dotenv
 from pathlib import Path
 import json
-import asyncio
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +18,8 @@ from funciones_categorias import obtener_categorias_usuario
 client = AsyncGroq()
 
 async def deducir_categoria(info_transaccion : str, lista_categorias : list[tuple[int, str]]):
+
+    id_sin_categoria = next((id for id, nombre_categoria in lista_categorias if nombre_categoria == "Sin categoria"), None)
 
     prompt_structured = f"""
     # ROL
@@ -38,13 +39,12 @@ async def deducir_categoria(info_transaccion : str, lista_categorias : list[tupl
     2. responde EXCLUSIVAMENTE CON UN OBJETO JSON que cumpla en el esquema requerido. NO AÑADAS NADA DEMÁS NI INTRODUCCIONES, ABSOLUTAMENTE NADA, SOLO LA SALIDA QUE TE PIDO (EL OBJETO JSON)
 
     # ESQUEMA DE SALIDA REQUERIDO (JSON)
-    {{"id_categoria": 0}}
+    {{"id_categoria": {id_sin_categoria}}}
 
     #EJEMPLO
     Sebastián (Usuario de FinTrack) ingresa una transacción con la info que describe que le pagaron en un trabajo de freelance, entonces analizamos eso con las categorías de la lista de categorias y en la lista existe un ID 11 para Trabajo/Ingresos: como retorno:
     {{"id_categoria": 11}}
 """
-    id_sin_categoria = next((id for id, nombre_categoria in lista_categorias if nombre_categoria == "Sin categoria"), None)
     
     try:
         response = await client.chat.completions.create(
@@ -57,7 +57,7 @@ async def deducir_categoria(info_transaccion : str, lista_categorias : list[tupl
 
         ids_validos = {id for id, _ in lista_categorias}
 
-        if resultado.get("id_categoria") not in ids_validos:
+        if resultado.get("id_categoria") not in ids_validos or resultado.get("id_categoria") == 0:
             logger.warning(f"LLM devolvió un ID inválido: {resultado}")
             return {"id_categoria": id_sin_categoria}
         
@@ -73,6 +73,3 @@ async def deducir_categoria(info_transaccion : str, lista_categorias : list[tupl
         logger.error(f"Respuesta de Groq no es JSON válido: {e}")
         return {"id_categoria": id_sin_categoria}
             
-lista = obtener_categorias_usuario(4)
-respuesta = asyncio.run(deducir_categoria("netflix mensual", lista))
-print(respuesta)

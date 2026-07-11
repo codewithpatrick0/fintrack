@@ -12,8 +12,7 @@ class TransaccionLeer(BaseModel):
     fecha: datetime.datetime | None=None
 
 class TransaccionCrear(BaseModel):
-    id_usuario: int
-    id_categoria: int
+    id_categoria: int | None = None
     tipo_movimiento: str
     monto: float
     fuente: str | None = None

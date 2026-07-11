@@ -10,5 +10,3 @@ def obtener_categorias_usuario(id: int):
         
         return resultado
 
-lista = obtener_categorias_usuario(4)
-print(lista)

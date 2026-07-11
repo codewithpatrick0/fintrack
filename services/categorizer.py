@@ -1,10 +1,14 @@
-from groq import AsyncGroq
+from groq import AsyncGroq, APIConnectionError, APITimeoutError, APIError
+import logging
 import sys
 from dotenv import load_dotenv
 from pathlib import Path
 import json
 import asyncio
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 raiz = Path(__file__).resolve().parent.parent
 if str(raiz) not in sys.path:
@@ -40,7 +44,7 @@ async def deducir_categoria(info_transaccion : str, lista_categorias : list[tupl
     Sebastián (Usuario de FinTrack) ingresa una transacción con la info que describe que le pagaron en un trabajo de freelance, entonces analizamos eso con las categorías de la lista de categorias y en la lista existe un ID 11 para Trabajo/Ingresos: como retorno:
     {{"id_categoria": 11}}
 """
-
+    id_sin_categoria = next((id for id, nombre_categoria in lista_categorias if nombre_categoria == "Sin categoria"), None)
     
     try:
         response = await client.chat.completions.create(
@@ -49,11 +53,25 @@ async def deducir_categoria(info_transaccion : str, lista_categorias : list[tupl
             response_format={"type": "json_object"},
             temperature=0.0
         )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        for id, nombre in lista_categorias:
-            if nombre == "Sin categoria":
-                return {"id_categoria": id}
+        resultado =  json.loads(response.choices[0].message.content)
+
+        ids_validos = {id for id, _ in lista_categorias}
+
+        if resultado.get("id_categoria") not in ids_validos:
+            logger.warning(f"LLM devolvió un ID inválido: {resultado}")
+            return {"id_categoria": id_sin_categoria}
+        
+        return resultado
+
+    except (APIConnectionError, APITimeoutError) as e:
+        logger.error(f"Error de conexión con Groq: {e}")
+        return {"id_categoria": id_sin_categoria}
+    except APIError as e:
+        logger.error(f"Error de la API de Groq: {e}")
+        return {"id_categoria": id_sin_categoria}
+    except json.JSONDecodeError as e:
+        logger.error(f"Respuesta de Groq no es JSON válido: {e}")
+        return {"id_categoria": id_sin_categoria}
             
 lista = obtener_categorias_usuario(4)
 respuesta = asyncio.run(deducir_categoria("netflix mensual", lista))

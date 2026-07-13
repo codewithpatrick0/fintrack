@@ -1,8 +1,8 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Response
+from fastapi import FastAPI, HTTPException, Depends, status, Response, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.concurrency import run_in_threadpool
 from conexion import obtener_conexion
-from transacciones_modelo import TransaccionLeer, TransaccionCrear
+from transacciones_modelo import TransaccionLeer, TransaccionCrear, TransaccionSimilar
 from usuarios_modelo import UsuarioCrear, UsuarioLeer
 from token_modelo import TokenMostrar
 from passlib.context import CryptContext
@@ -14,6 +14,7 @@ from datetime import datetime
 from categorias_modelo import CategoriaMostrar, CategoriaCrear, CategoriaEditar
 from services.categorizer import deducir_categoria
 from funciones_categorias import obtener_categorias_usuario
+from services.embeddings import orquestar_embedding_guardado, generar_embedding, buscar_similares
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,8 +55,7 @@ def obtener_transacciones(tipo_movimiento: str | None=None,
             valores.append(tipo_movimiento)
 
     
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
         if id_categoria:
             cursor.execute(consulta_categoria, (id_categoria,))
             resultado = cursor.fetchone()
@@ -89,7 +89,11 @@ def obtener_transacciones(tipo_movimiento: str | None=None,
         return transacciones
 
 @app.post('/transacciones', response_model=TransaccionLeer)
-async def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depends(verificar_token_acceso)):
+async def crear_transaccion(
+    transaccion: TransaccionCrear, 
+    background_tasks: BackgroundTasks,
+    id_user: int = Depends(verificar_token_acceso),
+    ):
 
     id_categoria_input = transaccion.id_categoria
     tipo_movimiento_input = transaccion.tipo_movimiento
@@ -109,8 +113,7 @@ async def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depend
     if tipo_movimiento_input not in ['gasto', 'ingreso', 'ahorro']:
         raise HTTPException(status_code=400, detail="El tipo de movimiento ingresado no es válido")
 
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
 
         columnas = ["id_usuario", "id_categoria", "tipo_movimiento", "monto", "fuente", "info"]
         valores = [id_user, id_categoria_input, tipo_movimiento_input, monto_input, fuente_input,info_input]
@@ -126,6 +129,9 @@ async def crear_transaccion(transaccion: TransaccionCrear, id_user: int = Depend
         resultado = cursor.fetchone()
         id_asignado = resultado[0] if resultado else None
         fecha_recibida = resultado[1] if resultado else None
+
+    if id_asignado:
+        background_tasks.add_task(orquestar_embedding_guardado, id_asignado)
 
     return TransaccionLeer(
         id=id_asignado,
@@ -158,8 +164,7 @@ def registrar_usuario(u: UsuarioCrear):
     contraseña_hasheada = pwd_context.hash(contraseña)
 
     try:
-        with obtener_conexion() as conexion:
-            cursor = conexion.cursor()
+        with obtener_conexion() as conexion, conexion.cursor() as cursor:
 
             consulta = """
                             INSERT INTO usuarios (nombre, nombre_usuario, telefono, hash_password)
@@ -169,7 +174,6 @@ def registrar_usuario(u: UsuarioCrear):
             cursor.execute(consulta, (nombre_input, nombre_usuario_input, telefono_input, contraseña_hasheada))
             resultado = cursor.fetchone()
             id_asignado = resultado[0] if resultado else None
-            cursor.close()
 
         return UsuarioLeer(
             id=id_asignado,
@@ -188,8 +192,7 @@ def ingresar(form_data: OAuth2PasswordRequestForm = Depends()):
     nombre_usuario_input = form_data.username
     pass_input = form_data.password
 
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
 
         consulta = "SELECT id, activo, hash_password FROM usuarios WHERE nombre_usuario = %s"
         cursor.execute(consulta, (nombre_usuario_input,))
@@ -198,7 +201,6 @@ def ingresar(form_data: OAuth2PasswordRequestForm = Depends()):
         id_obtenida = resultado[0] if resultado else None
         activo_obtenido = resultado[1] if resultado else None
         hash_obtenida = resultado[2] if resultado else None
-        cursor.close()
 
     error_credenciales_incorrectas = HTTPException(status_code=401, detail="Credenciales incorrectas")
     if id_obtenida is None:
@@ -222,8 +224,7 @@ def obtener_balance(fecha_inicio: datetime, fecha_final: datetime, id_user: int 
     if fecha_inicio > fecha_final:
         raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha final.")
 
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
 
         consulta = "SELECT tipo_movimiento, SUM(monto) AS Total FROM transacciones WHERE id_usuario = %s AND fecha BETWEEN %s AND %s GROUP BY tipo_movimiento;"
         cursor.execute(consulta, (id_user, fecha_inicio, fecha_final))
@@ -252,8 +253,7 @@ def mostrar_categorias(id: int = Depends(verificar_token_acceso)):
 
     consulta = "SELECT id, id_usuario, nombre_categoria FROM categorias WHERE (id_usuario IS NULL OR id_usuario = %s) AND activo = TRUE;"
     
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
         cursor.execute(consulta, (id,))
 
         resultados = cursor.fetchall()
@@ -275,8 +275,7 @@ def crear_categoria(c: CategoriaCrear, id: int = Depends(verificar_token_acceso)
     valores = [id, nombre_categoria_input]
 
     try:
-        with obtener_conexion() as conexion:
-            cursor = conexion.cursor()
+        with obtener_conexion() as conexion, conexion.cursor() as cursor:
             cursor.execute(consulta, valores)
             resultados = cursor.fetchone()
 
@@ -297,8 +296,7 @@ def editar_categoria(c: CategoriaEditar, id_user: int = Depends(verificar_token_
     nuevo_nombre = c.nuevo_nombre_categoria
     consulta = "UPDATE categorias SET nombre_categoria = %s WHERE nombre_categoria = %s AND id_usuario = %s RETURNING id;"
 
-    with obtener_conexion() as conexion:
-        cursor = conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
         cursor.execute(consulta, (nuevo_nombre, nombre_a_buscar, id_user))
 
         resultado = cursor.fetchone()
@@ -329,8 +327,7 @@ def eliminar_categoria(nombre:str, id: int = Depends(verificar_token_acceso)):
                     AND (nombre_categoria = %s  AND id_usuario = %s) RETURNING nombre_categoria;
                     """
     
-    with obtener_conexion() as conexion:
-        cursor =conexion.cursor()
+    with obtener_conexion() as conexion, conexion.cursor() as cursor:
         cursor.execute(consulta_id_sin_categoria)
         resultado = cursor.fetchone()
         id_sin_categoria=resultado[0] if resultado else None
@@ -347,3 +344,27 @@ def eliminar_categoria(nombre:str, id: int = Depends(verificar_token_acceso)):
             raise HTTPException(status_code=404, detail='El nombre de la categoria no existe')
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    
+@app.get('/transacciones/obtener-transacciones', response_model=list[TransaccionSimilar])
+async def obtener_similares(similar: str, límite: int = 5, id_user: int = Depends(verificar_token_acceso)):
+    
+    vector_consulta = generar_embedding(similar, "search_query")
+    resultado = buscar_similares(id_user, vector_consulta, límite)
+
+    if not resultado:
+        return []
+
+    similares = [TransaccionSimilar(
+        id=r[0],
+        id_usuario=id_user,
+        id_categoria=r[1],
+        nombre_categoria=r[2],
+        tipo_movimiento=r[3],
+        monto=r[4],
+        fuente=r[5],
+        info=r[6],
+        fecha=r[7],
+        porcentaje_similitud=r[8]
+    ) for r in resultado]
+
+    return similares

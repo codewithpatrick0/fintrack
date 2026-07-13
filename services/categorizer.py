@@ -1,19 +1,12 @@
 from groq import AsyncGroq, APIConnectionError, APITimeoutError, APIError
 import logging
-import sys
 from dotenv import load_dotenv
-from pathlib import Path
 import json
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-raiz = Path(__file__).resolve().parent.parent
-if str(raiz) not in sys.path:
-    sys.path.append(str(raiz))
-
-from funciones_categorias import obtener_categorias_usuario
 
 client = AsyncGroq()
 

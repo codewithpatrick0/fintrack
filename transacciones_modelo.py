@@ -18,3 +18,15 @@ class TransaccionCrear(BaseModel):
     fuente: str | None = None
     info: str | None = None
     fecha: datetime.datetime | None=None
+
+class TransaccionSimilar(BaseModel):
+    id: int
+    id_usuario: int
+    id_categoria: int
+    nombre_categoria: str
+    tipo_movimiento: str
+    monto: float
+    fuente: str | None=None
+    info: str | None=None
+    fecha: datetime.datetime | None=None
+    porcentaje_similitud: float

@@ -346,7 +346,7 @@ def eliminar_categoria(nombre:str, id: int = Depends(verificar_token_acceso)):
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     
 @app.get('/transacciones/obtener-transacciones', response_model=list[TransaccionSimilar])
-async def obtener_similares(similar: str, límite: int = 5, id_user: int = Depends(verificar_token_acceso)):
+def obtener_similares(similar: str, límite: int = 5, id_user: int = Depends(verificar_token_acceso)):
     
     vector_consulta = generar_embedding(similar, "search_query")
     resultado = buscar_similares(id_user, vector_consulta, límite)

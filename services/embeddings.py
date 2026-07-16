@@ -1,4 +1,4 @@
-import cohere
+from cohere import AsyncClientV2
 from dotenv import load_dotenv
 from pathlib import Path
 import sys
@@ -12,10 +12,10 @@ from conexion import obtener_conexion
 from funciones_transacciones import obtener_info
 load_dotenv()
 
-co_client = cohere.ClientV2()
+co_client = AsyncClientV2()
 
-def generar_embedding(info, tipo):
-    response = co_client.embed(
+async def generar_embedding(info, tipo):
+    response = await co_client.embed(
         texts=[info],
         model='embed-v4.0',
         output_dimension=1024,
@@ -42,7 +42,7 @@ def buscar_similares(id_user: int, vector: list, limite: int = 5):
     with obtener_conexion() as conexion:
         cursor = conexion.cursor()
         consulta = """
-                     SELECT te.id_transaccion, t.id_categoria, c.nombre_categoria, t.tipo_movimiento, 
+                    SELECT te.id_transaccion, t.id_categoria, c.nombre_categoria, t.tipo_movimiento, 
                     t.monto, t.fuente, t.info, t.fecha, 
                     1-(te.embedding <=> %s::vector) AS porcentaje_similitud
                     FROM transacciones_embeddings te
